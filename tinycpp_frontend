@@ -1,0 +1,9 @@
+#pragma once
+
+namespace tiny {
+
+    class tinycpp_frontend {
+    public:
+
+    }; // tinycpp_frontend
+}
