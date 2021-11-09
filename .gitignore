@@ -1,0 +1,11 @@
+# Generally ignores everything...
+/*
+# ...except such files and folders as:
+!/tinycpp/
+!tinycpp_frontend
+!tinycpp_reference.md
+!CMakeLists.txt
+!.gitignore
+!.gitmodules
+!LICENSE
+!README.md
