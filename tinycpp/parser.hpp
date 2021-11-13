@@ -4,10 +4,8 @@
 #include <cstring>
 #include <cctype>
 
-namespace tinycpp
-{
-    namespace keywords
-    {
+namespace tinycpp {
+    namespace keywords {
         // tinyc
         const std::string struct_ = "struct";
         const std::string integer_ = "int";
@@ -19,29 +17,45 @@ namespace tinycpp
         const std::string trait_ = "trait";
     }
 
-    class KeywordCase
+    struct ParseInput
     {
+    private:
+        std::istream & stream_;
+    public:
+        ParseInput(std::istream & stream) : stream_{stream} { }
+    public:
+        bool isComplete() const { return stream_.eof(); }
+
+        int readCurrent() { return stream_.peek(); }
+
+        char takeCurrent() {
+            char c;
+            stream_ >> c;
+        }
+
+        void skipWhitespaces() {
+            do {
+                int code = readCurrent();
+                if (code == EOF || !std::isspace(code)) return;
+                takeCurrent();
+            } while(true);
+        }
+    };
+
+    class KeywordCase {
     private:
         bool isValid_ = true;
         const std::string & text_;
     public:
         KeywordCase(const std::string & text) : text_{text} { }
     public:
-        bool isValid() const
-        {
-            return isValid_;
-        }
+        bool isValid() const { return isValid_; }
 
-        void reset()
-        {
-            isValid_ = true;
-        }
+        void reset() { isValid_ = true; }
 
-        void check(char c, int index)
-        {
+        void check(char c, int index) {
             if (!isValid_) return;
-            if (index > text_.length())
-            {
+            if (index > text_.length()) {
                 isValid_ = false;
                 return;
             }
@@ -49,54 +63,36 @@ namespace tinycpp
         }
     };
 
-    class IdentifierCase
-    {
+    class IdentifierCase {
     private:
         bool isValid_ = true;
     public:
-        bool isValid() const
-        {
-            return isValid_;
-        }
+        bool isValid() const { return isValid_; }
 
-        void reset()
-        {
-            isValid_ = true;
-        }
+        void reset() { isValid_ = true; }
 
-        void check(char c, int index)
-        {
+        void check(char c, int index) {
             isValid_ = (index == 0 ? std::isalpha(c) : isValid_ && std::isalnum(c)) || c == '_';
         }
     };
 
-    class NumberCase 
-    {
+    class NumberCase {
     private:
         bool isValid_ = true;
         int separations_ = 0;
     public:
-        bool isInteger() const
-        {
-            return isValid_ && separations_ == 0;
-        }
+        bool isInteger() const { return isValid_ && separations_ == 0; }
 
-        bool isDouble() const 
-        {
-            return isValid_ && separations_ == 1;
-        }
+        bool isDouble() const { return isValid_ && separations_ == 1; }
 
-        void reset()
-        {
+        void reset() {
             isValid_ = true;
             separations_ = 0;
         }
 
-        void check(char c)
-        {
+        void check(char c) {
             if (!isValid_) return;
-            if (c == '.') 
-            {
+            if (c == '.') {
                 separations_++;
                 return;
             }
@@ -104,25 +100,16 @@ namespace tinycpp
         }
     };
 
-    class CharacterCase 
-    {
+    class CharacterCase {
     private:
         bool isValid_ = true;
     public:
-        bool isValid() const
-        {
-            return isValid_;
-        }
+        bool isValid() const { return isValid_; }
 
-        void reset()
-        {
-            isValid_ = true;
-        }
+        void reset() { isValid_ = true; }
 
-        void check(char c, int index)
-        {
-            switch (index)
-            {
+        void check(char c, int index) {
+            switch (index) {
                 case 0:
                 case 2:
                     isValid_ = isValid_ && c == '\'';
@@ -133,8 +120,7 @@ namespace tinycpp
         }
     };
 
-    class AST
-    {
+    class AST {
     public:
         // types
         class Node {};
@@ -147,78 +133,89 @@ namespace tinycpp
 
 
 
-    class ParseData
-    {
-    public:
-        std::istream & input;
-        std::stringstream buffer;
-        AST::Node * currentNode;
-        KeywordCase caseNamespace;
-        KeywordCase caseClass;
-        IdentifierCase caseIdentifier;
-        CharacterCase caseCharacter;
-        NumberCase caseNumber;
+    class Parser {
+    private:
+        ParseInput input_;
 
-    public:
-        ParseData(std::istream & input) : input{input}
-            , caseNamespace{keywords::namespace_}
-            , caseClass{keywords::class_}
-        {   }
+        KeywordCase caseNamespace_;
+        KeywordCase caseClass_;
 
-    public:
-        void resetWord()
+        IdentifierCase caseIdentifier_;
+        CharacterCase caseCharacter_;
+        NumberCase caseNumber_;
+
+    private:
+        void resetCases() {
+            caseNamespace_.reset();
+            caseClass_.reset();
+            caseIdentifier_.reset();
+            caseCharacter_.reset();
+            caseNumber_.reset();
+        }
+
+        void reach(char target) 
         {
-            buffer.str("");
-            caseNamespace.reset();
-            caseClass.reset();
-            caseIdentifier.reset();
-            caseCharacter.reset();
-            caseNumber.reset();
+            input_.skipWhitespaces();
+            assert(!input_.isComplete() && "Parse expectation was not fullfilled.");
+            char c = input_.takeCurrent();
+            assert(c == target && "Parse expectation was not fullfilled.");
+        }
+
+        void processNamespace() {
+            /* Draft:
+             [*] skip whitespaces and expect 'namespace'
+             [*] skip whitespaces and expect(and save) identifier
+             [*] skip whitespaces and expect '{'
+             [A] try parse global variable, or class, or function, or struct.
+             [*] skip whitespaces and expect '}' or go to [A]
+             [END]
+             */
+
+            resetCases();
+            reach('{');
+            // TODO: continue parse
+            reach('}');
+        }
+
+        void processField() {
+            /* Draft:
+             [*] skip whitespaces and expect(and save) type
+             [*] skip whitespaces and expect(and save) identifier
+             [*] skip whitespaces and expect ';'
+             [END]
+             */
+        }
+
+    public:
+        Parser(std::istream & input) : input_{input}
+            , caseNamespace_{keywords::namespace_}
+            , caseClass_{keywords::class_}
+        {
+            /// TODO: continue parsing
+
+            /* Draft:
+             [1] process input as namespace
+             [2] go to [1] if input is not empty
+             [3] end
+             */
+
+            // do 
+            // {
+            //     input_.skipWhitespaces();
+            //     caseNamespace_.
+            // }
+            // for () {
+            //     if () {
+            //         // what is the word ?
+            //         if (caseNamespace_.isValid()) processNamespace();
+            //         if (caseIdentifier_.isValid()) processVariable();
+            //         else assert(false && "failed to parse root.");
+            //     } else {
+            //         caseNamespace_.check(c);
+            //         caseClass_.check(c);
+            //         caseIdentifier_.check(c);
+            //     }
+            // }
         }
     };
-
-
-    void parseNamespace(ParseData & data)
-    {
-        data.resetWord();
-    }
-
-    void parseVariable(ParseData & data)
-    {
-        /// TODO: parse variable
-    }
-
-    // returns { Parse Error | { Namespace | Class | Struct | Trait | Variable  } Syntax Tree }
-    void parseRoot(ParseData & data)
-    {
-        data.resetWord();
-        for (int letterCount = 0; !data.input.eof();)
-        {
-            char c;
-            data.input >> c;
-            if (std::isspace(c))
-            {
-                letterCount = 0;
-                // what is the word ?
-                if (data.buffer.tellp() == 0) continue; // didnt found word yet
-                if (data.caseNamespace.isValid()) parseNamespace(data);
-                if (data.caseIdentifier.isValid()) parseVariable(data);
-                else assert(false && "failed to parse root.");
-            }
-            else
-            {
-                data.buffer << c;
-                data.caseNamespace.check(c, letterCount);
-                data.caseClass.check(c, letterCount);
-                data.caseIdentifier.check(c, letterCount);
-                letterCount++;
-            }
-        }
-    }
-
-    void parse(std::istream & input)
-    {
-        ParseData data {input};
-        parseRoot(data);
-    }
 }
