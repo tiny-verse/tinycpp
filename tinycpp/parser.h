@@ -1,11 +1,14 @@
+// standard
 #include <memory>
 #include <unordered_set>
 
+// external
 #include "common/symbol.h"
 #include "common/lexer.h"
 #include "common/parser.h"
 #include "common/ast.h"
 
+// internal
 #include "tinycpp/ast.h"
 
 namespace tinycpp {
@@ -17,10 +20,11 @@ namespace tinycpp {
     using ParserBase = tiny::ParserBase;
     using ParserError = tiny::ParserError;
 
-    namespace symbols 
-    {
-        static Symbol Namespace {"namespace"};
+    namespace symbols {
         static Symbol Class {"class"};
+        static Symbol This {"this"};
+        static Symbol Base {"base"};
+        static Symbol Trait {"trait"};
     }
 
     class Parser : public ParserBase {
@@ -28,13 +32,6 @@ namespace tinycpp {
         static std::unique_ptr<ASTBase> ParseFile(std::string const & filename) {
             Parser p{Lexer::TokenizeFile(filename)};
             std::unique_ptr<ASTBase> result{p.PROGRAM()};
-            p.pop(Token::Kind::EoF);
-            return result;
-        }
-
-        static std::unique_ptr<ASTBase> Parse(std::string const & code, std::string const & filename) {
-            Parser p{Lexer::Tokenize(code, filename)};
-            std::unique_ptr<ASTBase> result{p.REPL()};
             p.pop(Token::Kind::EoF);
             return result;
         }
@@ -72,24 +69,9 @@ namespace tinycpp {
             return true;
         }
 
-        /** \name Types Ambiguity
-
-            tinyC shares the unfortunate problem of C and C++ grammars which makes it impossible to determine whether an expression is type declaration or an expression simply from the grammar. take for instance
-
-                foo * a;
-
-            Is this declaration of variable of name `a` with type `foo*`, or is this multiplication of two variables `foo` and `a`. Ideally this ambiguity should be solved at the grammar level such as introducing `var` keyword, or some such, but for educational purposes we have decided to keep this "feature" in the language.
-
-            The way to fix this is to make the parser track all possible type names so that an identifier can be resolved as being either variable, or a type, thus removing the ambiguity. In tiny's case this is further complicated by the parser being state-full in the repl mode.
-         */
-
         std::unordered_set<Symbol> possibleTypes_;
         std::vector<Symbol> possibleTypesStack_;
 
-        /** Returns true if given symbol is a type.
-
-            Checks both own tentative records and the frontend's valid records.
-         */
         bool isTypeName(Symbol name) const;
 
         /** Adds given symbol as a tentative typename.
@@ -116,10 +98,12 @@ namespace tinycpp {
             }
         };
 
+        // === Case Rollback ===
+        /// TODO: possibleTypesStack, position(), revretTo(): are helpful if a case could fail,
+        ///       so we may return and try another case.
         Position position() {
             return Position{ParserBase::position(), possibleTypesStack_.size()};
         }
-
         void revertTo(Position const & p) {
             ParserBase::revertTo(p.position_);
             while (possibleTypesStack_.size() > p.possibleTypesSize_) {
@@ -127,53 +111,107 @@ namespace tinycpp {
                 possibleTypesStack_.pop_back();
             }
         }
+        // =====================
 
-        void raiseError(const std::string & message) const {
+
+        void throwError(const std::string & message) const {
             throw ParserError{message, top().location(), eof()};
         }
 
-        void expect(Symbol & symbol) 
-        {
-            if (!condPop(symbol)) {
-                raiseError(STR("Expected keyword \"" << symbols::Namespace.name() <<  "\", but found: " << top()));
+        Symbol popIdentifier() {
+            auto token = pop(Token::Kind::Identifier);
+            return token.valueSymbol();
+        }
+
+        int popInteger(bool isSigned) {
+            auto token = pop(Token::Kind::Integer);
+            int value = token.valueInt();
+            if (!isSigned && value < 0) {
+                throwError(STR("Expected unsigned integer, but got signed: " << value));
+            }
+            return value;
+        }
+
+        std::unique_ptr<AST> FIELD() {
+            if (condPop(Symbol::KwTypedef)) { // function ptr
+                // * type
+                auto sReturnType = popIdentifier();
+                // * identifier
+                pop(Symbol::ParOpen);
+                pop(Symbol::Mul);
+                auto tName = top();
+                auto sName = popIdentifier();
+                pop(Symbol::ParClose);
+                // * parameters
+                auto astFuncPtr = std::make_unique<AST::FunctionPointer>(tName, sReturnType, sName);
+                pop(Symbol::ParOpen);
+                do {
+                    auto astParam = FIELD();
+                    astFuncPtr->addParameter(astParam);
+                } while(condPop(Symbol::Colon));
+                pop(Symbol::ParClose);
+                return astFuncPtr;
+            } else {
+                auto sType = popIdentifier();
+                addTypeName(sType);
+                while (condPop(Symbol::Mul)); // skip pointer part declaration
+                auto tName = top();
+                auto sName = popIdentifier();
+                uint arraySize = 0;
+                if (condPop(Symbol::SquareOpen)) {
+                    arraySize = popInteger(false);
+                    pop(Symbol::SquareClose);
+                }
+                auto ast = std::make_unique<AST::Variable>(tName, sType, sName, arraySize);
+                pop(Symbol::Semicolon);
+                return ast;
             }
         }
 
-        /*  Parsing
+        std::unique_ptr<AST> STRUCT() {
+            pop(Symbol::KwStruct);
+            auto name = popIdentifier();
+            addTypeName(name);
+            pop(Symbol::ParOpen);
+            assert(false && "not implemented");
+            pop(Symbol::ParClose);
+        }
 
-            Nothing fancy here, just a very simple recursive descent parser built on the basic framework.
-         */
+        std::unique_ptr<AST> FUNCTION() {
+            assert(false && "not implemented");
+        }
+
+        std::unique_ptr<AST> CLASS() { 
+            std::unique_ptr<AST::Class> result(new AST::Class{ pop() });
+            pop(Symbol::ParOpen);
+            assert(false && "not implemented");
+            pop(Symbol::ParClose);
+            return result;
+        }
+
         std::unique_ptr<AST> PROGRAM()
         {
             while (!eof()) {
-                expect(symbols::Namespace);
-                return NAMESPACE();
+                if (condPop(Symbol::KwStruct)) {
+                    assert(false && "not implemented");
+                }
+                else if (condPop(symbols::Class)) {
+                    assert(false && "not implemented");
+                }
+                else if (condPop(symbols::Trait)) {
+                    assert(false && "not implemented");
+                }
+                else // pop type
+                {
+                    assert(false && "not implemented");
+                    // pop name
+                    // if '(' -> method
+                    // else if ';' -> variable
+                }
             }
             return nullptr;
         }
 
-        std::unique_ptr<AST> REPL() {
-
-        }
-
-        std::unique_ptr<AST> NAMESPACE() {
-            std::unique_ptr<AST::Namespace> result{new AST::Namespace{pop()}};
-            expect(Symbol::ParOpen);
-            if (condPop(symbols::Class)) {
-                result->add(CLASS());
-            } else {
-                result->add(std::make_unique<ASTRaw>(pop()));
-            }
-            expect(Symbol::ParClose);
-        }
-
-        std::unique_ptr<AST> CLASS() { 
-            std::unique_ptr<AST::Class> result{new AST::Class{pop()}};
-            expect(Symbol::ParOpen);
-            /// TODO: continue
-            expect(Symbol::ParClose);
-            return result;
-        }
     }; // class Parser
 
 } // namespace tinycpp

@@ -46,9 +46,13 @@ namespace tinycpp {
         AST(Token const & token) : ASTBase{token} { }
     public:
         virtual void print(ASTContext & context) = 0;
+        void print(ASTPrettyPrinter & printer) const override {
+            assert(false && "not implemented");
+        }
     public:
-        class Namespace;
         class Class;
+        class Variable;
+        class FunctionPointer;
     }; // class AST
 
 
@@ -69,25 +73,50 @@ namespace tinycpp {
     }; // class ASTRaw
 
 
-    class AST::Namespace : public AST {
+    class AST::Variable : public AST {
     private:
-        std::vector<std::unique_ptr<AST>> content_;
+        Symbol type_;
         Symbol name_;
+        std::unique_ptr<AST> assignment_;
+        uint arraySize_;
     public:
-        Namespace(Token const & token) : AST{token}, name_{token.valueSymbol()} { }
+        Variable(Token const & nameToken, Symbol type, Symbol name, uint arraySize): AST{nameToken}
+            ,type_{type}
+            ,name_{name}
+            ,arraySize_{arraySize}
+        { }
     public:
-        void print(ASTContext & context) override {
-            context.enterNamespace(name_);
-            for (auto & ast : content_) {
-                ast->print(context);
-            }
-            context.exitNamespace();
+        void print(ASTContext & context) {
+            assert(false && "not implemented");
         }
+        void setAssignemnt(std::unique_ptr<AST> & assignment) {
+            assignment_ = std::move(assignment);
+        }
+    };
 
-        void add(std::unique_ptr<AST> && ast) {
-            content_.push_back(ast);
+
+    class AST::FunctionPointer : public AST {
+    private:
+        Symbol returnType_;
+        Symbol name_;
+        std::vector<std::unique_ptr<AST>> parameters_;
+    public:
+        FunctionPointer(
+            Token const & nameToken,
+            Symbol returnType,
+            Symbol name
+        ) : AST(nameToken)
+            ,returnType_{returnType_}
+            ,name_{name}
+        { }
+    public:
+        void print(ASTContext & context) {
+            assert(false && "not implemented");
         }
-    }; // class AST::Namespace
+        void addParameter(std::unique_ptr<AST> & ast) {
+            parameters_.push_back(std::move(ast));
+        }
+    };
 
 
     class AST::Class : public AST {
@@ -100,16 +129,17 @@ namespace tinycpp {
     public:
         void print(ASTContext & context) override {
             auto printer = context.getPrinter();
-            printer << "struct " << name_.name() << "{";
+            printer << "struct ";
+            context.printName(name_, printer.keyword);
+            printer << "{\n";
             printer.indent();
-            printer.newline();
             for (auto & ast : fields_)
             {
                 ast->print(context);
                 printer.newline();
             }
             printer.dedent();
-            printer << "}";
+            printer << "}\n";
             for (auto & ast : functions_)
             {
                 ast->print(context);
@@ -118,11 +148,11 @@ namespace tinycpp {
         }
 
         void addField(std::unique_ptr<AST> & ast) {
-            fields_.push_back(ast);
+            fields_.push_back(std::move(ast));
         }
 
         void addFunction(std::unique_ptr<AST> & ast) {
-            fields_.push_back(ast);
+            fields_.push_back(std::move(ast));
         }
     }; // class AST::Class
 
