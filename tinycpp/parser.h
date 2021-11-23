@@ -21,10 +21,11 @@ namespace tinycpp {
     using ParserError = tiny::ParserError;
 
     namespace symbols {
-        static Symbol Class {"class"};
-        static Symbol This {"this"};
-        static Symbol Base {"base"};
-        static Symbol Trait {"trait"};
+        static Symbol KwClass {"class"};
+        static Symbol KwThis {"this"};
+        static Symbol KwBase {"base"};
+        static Symbol KwTrait {"trait"};
+        static Symbol KwIs {"is"};
     }
 
     class Parser : public ParserBase {
@@ -42,12 +43,12 @@ namespace tinycpp {
             ParserBase{std::move(tokens)} {
         }
 
-        /** Determines if given token is a valid user identifier.
+        /** Determines if given token is a language keyword.
          */
-        bool isIdentifier(Token const & t) {
-            if (t != Token::Kind::Identifier)
-                return false;
-            if (t == Symbol::KwBreak
+        bool isKeyword(Token const & t) {
+            return 
+                // tinyc keywords
+                t == Symbol::KwBreak
                 || t == Symbol::KwCase
                 || t == Symbol::KwCast
                 || t == Symbol::KwChar
@@ -64,8 +65,20 @@ namespace tinycpp {
                 || t == Symbol::KwSwitch
                 || t == Symbol::KwTypedef
                 || t == Symbol::KwVoid
-                || t == Symbol::KwWhile)
-                 return false;
+                || t == Symbol::KwWhile
+                // tinycpp keywords
+                || t == symbols::KwClass
+                || t == symbols::KwBase
+                || t == symbols::KwThis
+                || t == symbols::KwTrait;
+        }
+
+        /** Determines if given token is a valid user identifier.
+         */
+        bool isIdentifier(Token const & t) {
+            if (t != Token::Kind::Identifier || isKeyword(t)) {
+                return false;
+            }
             return true;
         }
 
@@ -132,6 +145,11 @@ namespace tinycpp {
             return value;
         }
 
+        std::unique_ptr<AST> TYPE() {
+            // function pointer ????
+            assert(false && "move type parsing here!");
+        }
+
         std::unique_ptr<AST> FIELD() {
             if (condPop(Symbol::KwTypedef)) { // function ptr
                 // * type
@@ -147,7 +165,7 @@ namespace tinycpp {
                 pop(Symbol::ParOpen);
                 do {
                     auto astParam = FIELD();
-                    astFuncPtr->addParameter(astParam);
+                    astFuncPtr->takeAsParameter(astParam);
                 } while(condPop(Symbol::Colon));
                 pop(Symbol::ParClose);
                 return astFuncPtr;
@@ -170,15 +188,20 @@ namespace tinycpp {
 
         std::unique_ptr<AST> STRUCT() {
             pop(Symbol::KwStruct);
-            auto name = popIdentifier();
-            addTypeName(name);
+            auto tName = top();
+            auto sName = popIdentifier();
+            addTypeName(sName);
             pop(Symbol::ParOpen);
-            assert(false && "not implemented");
-            pop(Symbol::ParClose);
+            auto astStruct = std::make_unique<AST::Struct>(tName, sName);
+            while(!condPop(Symbol::ParClose)) {
+                auto astField = FIELD();
+                astStruct->takeAsField(astField);
+            }
+            return astStruct;
         }
 
         std::unique_ptr<AST> FUNCTION() {
-            assert(false && "not implemented");
+            
         }
 
         std::unique_ptr<AST> CLASS() { 
@@ -189,20 +212,15 @@ namespace tinycpp {
             return result;
         }
 
-        std::unique_ptr<AST> PROGRAM()
-        {
+        std::unique_ptr<AST> PROGRAM() {
             while (!eof()) {
                 if (condPop(Symbol::KwStruct)) {
                     assert(false && "not implemented");
-                }
-                else if (condPop(symbols::Class)) {
+                } else if (condPop(symbols::KwClass)) {
                     assert(false && "not implemented");
-                }
-                else if (condPop(symbols::Trait)) {
+                } else if (condPop(symbols::KwTrait)) {
                     assert(false && "not implemented");
-                }
-                else // pop type
-                {
+                } else { // pop type
                     assert(false && "not implemented");
                     // pop name
                     // if '(' -> method

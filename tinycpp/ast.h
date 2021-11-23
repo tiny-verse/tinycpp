@@ -50,9 +50,11 @@ namespace tinycpp {
             assert(false && "not implemented");
         }
     public:
-        class Class;
         class Variable;
         class FunctionPointer;
+        class Struct;
+        class Function;
+        class Class;
     }; // class AST
 
 
@@ -89,10 +91,10 @@ namespace tinycpp {
         void print(ASTContext & context) {
             assert(false && "not implemented");
         }
-        void setAssignemnt(std::unique_ptr<AST> & assignment) {
+        void takeAsAssignemnt(std::unique_ptr<AST> & assignment) {
             assignment_ = std::move(assignment);
         }
-    };
+    }; // class AST::Variable
 
 
     class AST::FunctionPointer : public AST {
@@ -113,10 +115,55 @@ namespace tinycpp {
         void print(ASTContext & context) {
             assert(false && "not implemented");
         }
-        void addParameter(std::unique_ptr<AST> & ast) {
+        void takeAsParameter(std::unique_ptr<AST> & ast) {
             parameters_.push_back(std::move(ast));
         }
-    };
+    }; // class AST::FunctionPointer
+
+
+    class AST::Struct : public AST {
+    private:
+        Symbol name_;
+        std::vector<std::unique_ptr<AST>> fields_;
+    public:
+        Struct(Token const & token, Symbol name) : AST{token}, name_{name} { }
+    public:
+        void print(ASTContext & context) override {
+            auto printer = context.getPrinter();
+            printer << "struct ";
+            context.printName(name_, printer.keyword);
+            printer << "{\n";
+            printer.indent();
+            for (auto & ast : fields_)
+            {
+                ast->print(context);
+                printer.newline();
+            }
+            printer.dedent();
+            printer << "}\n";
+        }
+
+        void takeAsField(std::unique_ptr<AST> & ast) {
+            fields_.push_back(std::move(ast));
+        }
+    }; // class AST::Struct
+
+
+    class AST::Function : public AST {
+    private:
+        Symbol type_;
+        Symbol name_;
+        std::vector<std::unique_ptr<AST>> parameters_;
+    public:
+        Function(Token const & token, Symbol type, Symbol name): AST{token}
+            ,type_{type}
+            ,name_{name}
+        { }
+    public:
+        void takeAsParameter(std::unique_ptr<AST> & ast) {
+            parameters_.push_back(std::move(ast));
+        }
+    }; // class AST::Function
 
 
     class AST::Class : public AST {
@@ -147,11 +194,11 @@ namespace tinycpp {
             }
         }
 
-        void addField(std::unique_ptr<AST> & ast) {
+        void takeAsField(std::unique_ptr<AST> & ast) {
             fields_.push_back(std::move(ast));
         }
 
-        void addFunction(std::unique_ptr<AST> & ast) {
+        void takeAsMethod(std::unique_ptr<AST> & ast) {
             fields_.push_back(std::move(ast));
         }
     }; // class AST::Class

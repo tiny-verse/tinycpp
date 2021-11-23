@@ -1,4 +1,15 @@
-# tinyC Language Reference
+# tinyCPP Language Reference
+
+### DRAFT IDEAS
+
+* "class" is represenation of object.
+* only single inheritance for classes
+* child class could override any method of the parent class. however, parent code IMPLICITLY executes first.
+* traits (are like interfaces in C#)
+* class could implement multiple traits
+* A class is NOT exportable - for internal organization only. traits replaces classes as an public interface (of a library). final interface of the library is set of: struct, functions, and traits.
+
+### Root
 
     PROGRAM := { NAMESPACE }
     NAMESPACE := 'namespace' identifier [ '.' identifier ] '{' [ { VAR_DECLS ';' | CLASS_DECL | STRUCT_DECL | FUN_DECL | FUNPTR_DECL } ] '}'
