@@ -1,44 +1,54 @@
+#pragma once
+
 // standard
 #include <memory>
 #include <unordered_set>
 
-// external
-#include "common/symbol.h"
-#include "common/lexer.h"
-#include "common/parser.h"
-#include "common/ast.h"
-
 // internal
+#include "tinycpp/shared.h"
 #include "tinycpp/ast.h"
+
 
 namespace tinycpp {
 
-    using Lexer = tiny::Lexer;
-    using Token = tiny::Token;
-    using Symbol = tiny::Symbol;
-    using ASTBase = tiny::ASTBase;
     using ParserBase = tiny::ParserBase;
     using ParserError = tiny::ParserError;
 
     namespace symbols {
-        static Symbol KwClass {"class"};
-        static Symbol KwThis {"this"};
         static Symbol KwBase {"base"};
-        static Symbol KwTrait {"trait"};
+        static Symbol KwClass {"class"};
         static Symbol KwIs {"is"};
+        static Symbol KwPrivate {"private"};
+        static Symbol KwProtected {"protected"};
+        static Symbol KwPublic {"public"};
+        static Symbol KwThis {"this"};
+        static Symbol KwTrait {"trait"};
+
+        bool isKeyword(Symbol const & s) {
+            return
+                s == KwBase
+                || s == KwClass 
+                || s == KwIs
+                || s == KwPrivate
+                || s == KwProtected
+                || s == KwPublic
+                || s == KwThis
+                || s == KwTrait
+                ;
+        }
     }
 
     class Parser : public ParserBase {
     public:
-        static std::unique_ptr<ASTBase> ParseFile(std::string const & filename) {
+        static uptr<AST> ParseFile(std::string const & filename) {
             Parser p{Lexer::TokenizeFile(filename)};
-            std::unique_ptr<ASTBase> result{p.PROGRAM()};
+            p.addTypeName(Symbol::KwInt);
+            p.addTypeName(Symbol::KwChar);
+            uptr<AST> result{p.parseProgram()};
             p.pop(Token::Kind::EoF);
             return result;
         }
-
     protected:
-
         Parser(std::vector<Token> && tokens):
             ParserBase{std::move(tokens)} {
         }
@@ -67,19 +77,13 @@ namespace tinycpp {
                 || t == Symbol::KwVoid
                 || t == Symbol::KwWhile
                 // tinycpp keywords
-                || t == symbols::KwClass
-                || t == symbols::KwBase
-                || t == symbols::KwThis
-                || t == symbols::KwTrait;
+                || symbols::isKeyword(t.valueSymbol());
         }
 
         /** Determines if given token is a valid user identifier.
          */
         bool isIdentifier(Token const & t) {
-            if (t != Token::Kind::Identifier || isKeyword(t)) {
-                return false;
-            }
-            return true;
+            return t.kind() == Token::Kind::Identifier && !isKeyword(t);
         }
 
         std::unordered_set<Symbol> possibleTypes_;
@@ -131,9 +135,24 @@ namespace tinycpp {
             throw ParserError{message, top().location(), eof()};
         }
 
-        Symbol popIdentifier() {
+        Symbol popIdentifierAsNewType() {
             auto token = pop(Token::Kind::Identifier);
-            return token.valueSymbol();
+            auto symbol = token.valueSymbol();
+            possibleTypes_.insert(symbol);
+            return symbol;
+        }
+
+        Symbol popIdentifier(bool asType) {
+            auto token = pop(Token::Kind::Identifier);
+            auto symbol = token.valueSymbol();
+            bool isType = possibleTypes_.find(symbol) != possibleTypes_.end();
+            if (asType && !isType) {
+                throwError(STR("Dont know type with name: " << symbol));
+            }
+            else if (!asType && isType) {
+                throwError(STR("Identifier cant be a type: " << symbol));
+            }
+            return symbol;
         }
 
         int popInteger(bool isSigned) {
@@ -145,89 +164,70 @@ namespace tinycpp {
             return value;
         }
 
-        std::unique_ptr<AST> TYPE() {
-            // function pointer ????
-            assert(false && "move type parsing here!");
-        }
-
-        std::unique_ptr<AST> FIELD() {
+        bool nextIsField(uptr<AST> & result) {
             if (condPop(Symbol::KwTypedef)) { // function ptr
-                // * type
-                auto sReturnType = popIdentifier();
-                // * identifier
-                pop(Symbol::ParOpen);
-                pop(Symbol::Mul);
-                auto tName = top();
-                auto sName = popIdentifier();
-                pop(Symbol::ParClose);
-                // * parameters
-                auto astFuncPtr = std::make_unique<AST::FunctionPointer>(tName, sReturnType, sName);
-                pop(Symbol::ParOpen);
-                do {
-                    auto astParam = FIELD();
-                    astFuncPtr->takeAsParameter(astParam);
-                } while(condPop(Symbol::Colon));
-                pop(Symbol::ParClose);
-                return astFuncPtr;
+                assert(false && "not implemented");
             } else {
-                auto sType = popIdentifier();
-                addTypeName(sType);
-                while (condPop(Symbol::Mul)); // skip pointer part declaration
-                auto tName = top();
-                auto sName = popIdentifier();
-                uint arraySize = 0;
+                auto * ast = new AST::Raw(top());
+                ast->add(top()); popIdentifier(true);
+                auto t = top();
+                while(condPop(Symbol::Mul)) {
+                    ast->add(t);
+                }
+                ast->add(top()); popIdentifier(false);
+                t = top();
                 if (condPop(Symbol::SquareOpen)) {
-                    arraySize = popInteger(false);
-                    pop(Symbol::SquareClose);
+                    ast->add(t);
+                    ast->add(pop(Token::Kind::Integer));
+                    ast->add(pop(Symbol::SquareClose));
                 }
-                auto ast = std::make_unique<AST::Variable>(tName, sType, sName, arraySize);
-                pop(Symbol::Semicolon);
-                return ast;
+                ast->add(pop(Symbol::Semicolon));
+                result.reset(ast);
+                return true;
             }
+            return false;
         }
 
-        std::unique_ptr<AST> STRUCT() {
-            pop(Symbol::KwStruct);
-            auto tName = top();
-            auto sName = popIdentifier();
-            addTypeName(sName);
-            pop(Symbol::ParOpen);
-            auto astStruct = std::make_unique<AST::Struct>(tName, sName);
-            while(!condPop(Symbol::ParClose)) {
-                auto astField = FIELD();
-                astStruct->takeAsField(astField);
+        bool nextIsClass(uptr<AST> & result) {
+            if (!condPop(symbols::KwClass)) {
+                return false;
             }
-            return astStruct;
+            auto astClass = new AST::Class{top()};
+            auto className = popIdentifierAsNewType();
+            pop(Symbol::CurlyOpen);
+            while(!condPop(Symbol::CurlyClose)) {
+                uptr<AST> astMember;
+                if (nextIsField(astMember)) {
+                    astClass->takeAsField(astMember);
+                }
+            }
+            pop(Symbol::Semicolon);
+            result.reset(astClass);
+            return true;
         }
 
-        std::unique_ptr<AST> FUNCTION() {
-            
-        }
-
-        std::unique_ptr<AST> CLASS() { 
-            std::unique_ptr<AST::Class> result(new AST::Class{ pop() });
-            pop(Symbol::ParOpen);
-            assert(false && "not implemented");
-            pop(Symbol::ParClose);
-            return result;
-        }
-
-        std::unique_ptr<AST> PROGRAM() {
+        uptr<AST> parseProgram() {
+            auto rootScope = new AST::Scope{top()};
+            AST::Raw * skippedPart = nullptr;
+            auto flushSkippedPart = [&rootScope, &skippedPart] {
+                if (skippedPart != nullptr) {
+                    rootScope->take(uptr<AST>{skippedPart});
+                    skippedPart = nullptr;
+                }
+            };
             while (!eof()) {
-                if (condPop(Symbol::KwStruct)) {
-                    assert(false && "not implemented");
-                } else if (condPop(symbols::KwClass)) {
-                    assert(false && "not implemented");
-                } else if (condPop(symbols::KwTrait)) {
-                    assert(false && "not implemented");
-                } else { // pop type
-                    assert(false && "not implemented");
-                    // pop name
-                    // if '(' -> method
-                    // else if ';' -> variable
+                uptr<AST> ast;
+                if (nextIsClass(ast)) {
+                    flushSkippedPart();
+                    rootScope->take(ast);
+                } else {
+                    if (skippedPart == nullptr) {
+                        skippedPart = new AST::Raw{top()};
+                    }
+                    skippedPart->add(pop());
                 }
             }
-            return nullptr;
+            return uptr<AST>{rootScope};
         }
 
     }; // class Parser

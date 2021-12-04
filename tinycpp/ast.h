@@ -1,27 +1,54 @@
+#pragma once
+
+// standard
 #include <vector>
 #include <memory>
 #include <string>
 #include <sstream>
 
-#include "common/ast.h"
+// internal
+#include "shared.h"
 
 namespace tinycpp {
 
-    using color = tiny::color;
-    using Token = tiny::Token;
-    using Symbol = tiny::Symbol;
-    using ASTBase = tiny::ASTBase;
-    using ASTPrettyPrinter = tiny::ASTPrettyPrinter;
-
-    struct ASTContext {
+    class ASTContext {
     private:
         ASTPrettyPrinter printer_;
         std::vector<Symbol> currentDomain_;
     public:
-        const ASTPrettyPrinter & getPrinter() const {
+        ASTContext(): printer_{std::cout} { }
+    public:
+        ASTPrettyPrinter & getPrinter() {
             return printer_;
         }
     public:
+        void print(Token const & token) {
+            switch (token.kind())
+            {
+            case Token::Kind::Identifier:
+                printer_ << printer_.identifier << token.valueSymbol().name();
+                break;
+            case Token::Kind::Double:
+                printer_ << printer_.numberLiteral <<  token.valueDouble();
+                break;
+            case Token::Kind::Integer:
+                printer_ << printer_.numberLiteral << token.valueInt();
+                break;
+            case Token::Kind::StringDoubleQuoted:
+                printer_ << printer_.stringLiteral << "\"" << token.valueString() << "\"";
+                break;
+            case Token::Kind::StringSingleQuoted:
+                printer_ << printer_.stringLiteral << "'" << token.valueString() << "'";
+                break;
+            case Token::Kind::Operator:
+                printer_ << token.valueSymbol().name();
+                break;
+            default:
+                break;
+            }
+            printer_ << color::reset << " ";
+        }
+
         void printName(Symbol name, color color) {
             printer_ << color;
             for (auto & name : currentDomain_) {
@@ -50,49 +77,104 @@ namespace tinycpp {
             assert(false && "not implemented");
         }
     public:
+        class Scope;
+        class Raw;
+        class Type;
         class Variable;
         class FunctionPointer;
         class Struct;
         class Function;
+        class Field;
         class Class;
     }; // class AST
 
 
-    class ASTRaw : public AST {
+    class AST::Scope : public AST {
     private:
-        std::stringstream merge_;
+        std::vector<uptr<AST>> content_;
     public:
-        ASTRaw(Token const & token) : AST{token} { }
+        Scope(Token const & token): AST{token} { }
     public:
         void print(ASTContext & context) override {
-            auto printer = context.getPrinter();
-            printer << merge_.str();
+            for (auto & ast : content_) {
+                ast->print(context);
+                context.getPrinter().newline();
+            }
         }
-
-        void add(Token & token) {
-            merge_ << token;
+        void take(uptr<AST> & ast) {
+            content_.push_back(std::move(ast));
         }
-    }; // class ASTRaw
+        void take(uptr<AST> && ast) {
+            content_.push_back(std::move(ast));
+        }
+    }; // class AST::Scope
 
 
-    class AST::Variable : public AST {
+    class AST::Raw : public AST {
     private:
-        Symbol type_;
-        Symbol name_;
-        std::unique_ptr<AST> assignment_;
-        uint arraySize_;
+        std::vector<Token> tokens_;
     public:
-        Variable(Token const & nameToken, Symbol type, Symbol name, uint arraySize): AST{nameToken}
-            ,type_{type}
+        Raw(Token const & token): AST{token} { }
+    public:
+        void print(ASTContext & context) override {
+            for (auto & t : tokens_) {
+                context.print(t);
+            }
+        }
+
+        void add(Token token) {
+            tokens_.push_back(token);
+        }
+    }; // class AST::Raw
+
+    class AST::Type : public AST {
+    private:
+        Symbol name_;
+        int pointerCount_;
+        int arraySize_;
+        // need a way to destinguish "set of traits" from other types.
+    public:
+        Type(Token const & token, Symbol name) : AST{token}
             ,name_{name}
-            ,arraySize_{arraySize}
+            ,pointerCount_{0}
+            ,arraySize_{0}
         { }
     public:
         void print(ASTContext & context) {
             assert(false && "not implemented");
         }
-        void takeAsAssignemnt(std::unique_ptr<AST> & assignment) {
-            assignment_ = std::move(assignment);
+
+        void increamentPointerCount() {
+            pointerCount_++;
+        }
+
+        void setArraySize(int value) {
+            arraySize_ = value;
+        }
+    };
+
+
+    class AST::Variable : public AST {
+    private:
+        Symbol name_;
+        uptr<AST> type_;
+        uptr<AST> assignment_;
+    public:
+        Variable(
+            Token const & nameToken,
+            uptr<AST::Type> & type,
+            Symbol name
+        ): AST{nameToken}
+            ,type_{std::move(type)}
+            ,name_{name}
+        { }
+    public:
+        void print(ASTContext & context) {
+            assert(false && "not implemented");
+        }
+
+        void takeAsAssignemnt(uptr<AST> & ast) {
+            assignment_ = std::move(ast);
         }
     }; // class AST::Variable
 
@@ -101,13 +183,13 @@ namespace tinycpp {
     private:
         Symbol returnType_;
         Symbol name_;
-        std::vector<std::unique_ptr<AST>> parameters_;
+        std::vector<uptr<AST>> parameters_;
     public:
         FunctionPointer(
             Token const & nameToken,
             Symbol returnType,
             Symbol name
-        ) : AST(nameToken)
+        ): AST(nameToken)
             ,returnType_{returnType_}
             ,name_{name}
         { }
@@ -115,7 +197,7 @@ namespace tinycpp {
         void print(ASTContext & context) {
             assert(false && "not implemented");
         }
-        void takeAsParameter(std::unique_ptr<AST> & ast) {
+        void takeAsParameter(uptr<AST> & ast) {
             parameters_.push_back(std::move(ast));
         }
     }; // class AST::FunctionPointer
@@ -124,7 +206,7 @@ namespace tinycpp {
     class AST::Struct : public AST {
     private:
         Symbol name_;
-        std::vector<std::unique_ptr<AST>> fields_;
+        std::vector<uptr<AST>> fields_;
     public:
         Struct(Token const & token, Symbol name) : AST{token}, name_{name} { }
     public:
@@ -143,7 +225,7 @@ namespace tinycpp {
             printer << "}\n";
         }
 
-        void takeAsField(std::unique_ptr<AST> & ast) {
+        void takeAsField(uptr<AST> & ast) {
             fields_.push_back(std::move(ast));
         }
     }; // class AST::Struct
@@ -151,54 +233,87 @@ namespace tinycpp {
 
     class AST::Function : public AST {
     private:
-        Symbol type_;
         Symbol name_;
-        std::vector<std::unique_ptr<AST>> parameters_;
+        uptr<AST::Type> type_;
+        std::vector<uptr<AST>> parameters_;
     public:
-        Function(Token const & token, Symbol type, Symbol name): AST{token}
-            ,type_{type}
+        Function(
+            Token const & token,
+            uptr<AST::Type> & type,
+            Symbol name
+        ): AST{token}
+            ,type_{std::move(type)}
             ,name_{name}
         { }
     public:
-        void takeAsParameter(std::unique_ptr<AST> & ast) {
+        void takeAsParameter(uptr<AST> & ast) {
             parameters_.push_back(std::move(ast));
         }
     }; // class AST::Function
 
+    enum class AccessLevel {
+        Override,
+        Private,
+        Protected,
+        Public,
+    };
+
+    class AST::Field : public AST::Variable {
+    private:
+        AccessLevel access_;
+    public:
+        Field(
+            Token const & nameToken,
+            uptr<AST::Type> & type,
+            Symbol name,
+            AccessLevel access
+        ): Variable{nameToken, type, name}
+            ,access_{access}
+        { }
+    };
 
     class AST::Class : public AST {
     private:
         Symbol name_;
-        std::vector<std::unique_ptr<AST>> fields_;
-        std::vector<std::unique_ptr<AST>> functions_;
+        std::vector<uptr<AST>> traits_;
+        std::vector<uptr<AST>> fields_;
+        std::vector<uptr<AST>> functions_;
     public:
         Class(Token const & token) : AST{token}, name_{token.valueSymbol()} { }
     public:
         void print(ASTContext & context) override {
-            auto printer = context.getPrinter();
-            printer << "struct ";
-            context.printName(name_, printer.keyword);
-            printer << "{\n";
-            printer.indent();
+            auto p = context.getPrinter();
+            p.newline();
+            p << p.keyword << "struct "
+              << p.identifier << name_.name()
+              << color::reset << " {";
+            p.indent();
+            p.newline();
             for (auto & ast : fields_)
             {
                 ast->print(context);
-                printer.newline();
+                p.newline();
             }
-            printer.dedent();
-            printer << "}\n";
+            p.dedent();
+            p.newline();
+            p << "}";
+            p.newline();
             for (auto & ast : functions_)
             {
                 ast->print(context);
-                printer.newline();
+                p.newline();
             }
         }
 
-        void takeAsField(std::unique_ptr<AST> & ast) {
+        void takeAsTraitType(uptr<AST> & ast) {
+            traits_.push_back(std::move(ast));
+        }
+
+        void takeAsField(uptr<AST> & ast) {
             fields_.push_back(std::move(ast));
         }
 
-        void takeAsMethod(std::unique_ptr<AST> & ast) {
+        void takeAsMethod(uptr<AST> & ast) {
             fields_.push_back(std::move(ast));
         }
     }; // class AST::Class
